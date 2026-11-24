@@ -38,6 +38,8 @@ log_interval = 1
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
+ckpt_save_optimizer = True # False = save only the model weights in numbered checkpoints (3x smaller; enough for sampling, resuming restarts the optimizer)
+ckpt_interval = 0 # if > 0: save a numbered checkpoint every ckpt_interval iterations (ckpt_001.pt, ckpt_002.pt, ...); must be a multiple of eval_interval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = False # disabled by default
@@ -103,6 +105,7 @@ print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
+assert ckpt_interval == 0 or ckpt_interval % eval_interval == 0, 'ckpt_interval must be a multiple of eval_interval'
 torch.manual_seed(1337 + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -156,6 +159,10 @@ elif init_from == 'resume':
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
     ckpt_path = os.path.join(out_dir, 'ckpt.pt')
+    if not os.path.exists(ckpt_path): # numbered checkpoints: resume from the newest one
+        numbered = sorted(f for f in os.listdir(out_dir) if f.startswith('ckpt_') and f.endswith('.pt'))
+        ckpt_path = os.path.join(out_dir, numbered[-1])
+    print(f"loading {ckpt_path}")
     checkpoint = torch.load(ckpt_path, map_location=device)
     checkpoint_model_args = checkpoint['model_args']
     # force these config attributes to be equal otherwise we can't even resume training
@@ -195,7 +202,10 @@ scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
 if init_from == 'resume':
-    optimizer.load_state_dict(checkpoint['optimizer'])
+    if checkpoint.get('optimizer') is not None:
+        optimizer.load_state_dict(checkpoint['optimizer'])
+    else:
+        print('checkpoint has no optimizer state: the optimizer starts fresh')
 checkpoint = None # free up memory
 
 # compile the model
@@ -260,6 +270,9 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        with open(os.path.join(out_dir, 'loss_log.csv'), 'a') as f: # one row per evaluation, used for the loss plot
+            if f.tell() == 0: f.write('iter,train_loss,val_loss\n')
+            f.write(f"{iter_num},{losses['train']:.4f},{losses['val']:.4f}\n")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
@@ -268,7 +281,20 @@ while True:
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
             })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
+        if ckpt_interval > 0:
+            # numbered checkpoints, one every ckpt_interval iterations: ckpt_001.pt, ckpt_002.pt, ...
+            best_val_loss = min(best_val_loss, losses['val'])
+            if iter_num > 0 and iter_num % ckpt_interval == 0:
+                seq = iter_num // ckpt_interval
+                ckpt_file_path = os.path.join(out_dir, f"ckpt_{seq:03d}.pt")
+                print(f"saving checkpoint {seq} (iter {iter_num}) to {ckpt_file_path}")
+                torch.save({'model': raw_model.state_dict(), 'optimizer': optimizer.state_dict() if ckpt_save_optimizer else None,
+                            'model_args': model_args, 'iter_num': iter_num,
+                            'best_val_loss': best_val_loss, 'val_loss': float(losses['val']),
+                            'train_loss': float(losses['train']), 'config': config}, ckpt_file_path)
+                with open(os.path.join(out_dir, 'ckpt_index.csv'), 'a') as f: # a small table of what is in each file
+                    f.write(f"{seq},{iter_num},{losses['train']:.4f},{losses['val']:.4f}\n")
+        elif losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:
                 checkpoint = {
@@ -331,6 +357,10 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
+
+if master_process and os.path.exists(os.path.join(out_dir, 'loss_log.csv')):
+    from plot_loss import plot
+    print(f"saved loss plot to {plot(out_dir, ckpt_interval)}")
 
 if ddp:
     destroy_process_group()

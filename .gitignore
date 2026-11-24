@@ -8,3 +8,8 @@ __pycache__/
 *.pt
 *.pyc
 input.txt
+train_mix.log
+chat.log
+out*/
+lab_runs/
+train_*.log

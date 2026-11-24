@@ -3,6 +3,39 @@
 
 ![nanoGPT](assets/nanogpt.jpg)
 
+
+## Class lab: train a tiny GPT on Shakespeare, and on Shakespeare + The Simpsons
+
+A two-day computational lab built on nanoGPT. Students train two small character-level GPT models, then probe them.
+
+| | Notebook | What happens |
+|---|---|---|
+| **Day 1** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kouroshSA/nanoGPT-Shakespeare-Simpsons-Lab/blob/main/colab/Day1_Train_Models.ipynb) | Train **Model S** (complete works of Shakespeare only) and **Model M** (Shakespeare + Simpsons mixed). 10,000 iterations each, block size 512, a numbered checkpoint every 1,000 iterations, saved to Google Drive. |
+| **Day 2** (60-75 min) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kouroshSA/nanoGPT-Shakespeare-Simpsons-Lab/blob/main/colab/Day2_Inference_Lab.ipynb) | **A:** same prompt through different checkpoints (1,000 characters), then one checkpoint at five temperatures (0.1 to 1.5); outputs are judged by an AI (Gemini) using a ready-made prompt. **B:** the same for Model M, to see whether it keeps the two styles apart. |
+
+Both models have **identical architecture** (6 layers, 8 heads, embedding size 512, about 19M parameters) and use the **same 87-character vocabulary** (`meta.pkl` files are byte-identical), so the only difference is the data and the two can be swapped freely.
+
+Run it yourself (no Colab needed):
+```
+python data/shakespeare_complete_char/prepare.py
+python data/shakespeare_simpsons_mix/prepare.py
+python train.py config/train_shakespeare_complete_char.py     # Model S -> out-shakespeare-complete-512/
+python train.py config/train_shakespeare_simpsons_mix.py      # Model M -> out-shakespeare-simpsons-mix/
+python chat_ui.py --out_dir=out-shakespeare-complete-512      # chat window at http://127.0.0.1:7860
+python sample.py --out_dir=out-shakespeare-complete-512 --ckpoint=ckpt_010.pt --start="HAMLET.\n"
+```
+
+What was added to nanoGPT / Raj Shah's Simpsons edition:
+- **Numbered checkpoints:** `ckpt_interval=1000` saves `ckpt_001.pt` ... `ckpt_010.pt` plus `ckpt_index.csv`; `ckpt_save_optimizer=False` keeps only the weights (3x smaller); resume continues from the newest checkpoint. `ckpt_interval=0` restores the original behaviour.
+- **Loss plot:** `loss_log.csv` and `loss_curve.png` (train vs validation loss) are written during and at the end of training (`plot_loss.py`).
+- **Chat window:** `chat_ui.py` (Gradio) - choose a checkpoint, set temperature and top-k, compare one prompt across all checkpoints. Pass `--share=True` on Colab.
+- **`lab_tools.py`:** helpers used by the Day 2 notebook (compare checkpoints, temperature sweep, Gemini prompt builder).
+- **Data:** `data/common.py` (shared cleaning and vocabulary), `data/shakespeare_complete_char/`, `data/shakespeare_simpsons_mix/`. Shakespeare is Project Gutenberg #100 (header/footer removed). Chunks of about 20,000 characters are shuffled before the 90/10 split, so validation covers many plays.
+
+Lab changes by Claude AI (Claude Sonnet 5.5), guided by K. Salehi-Ashtiani.
+
+---
+
 Simpsons NanoGPT readme:
 
 Built on top of all the great stuff of NanoGPT below but with the addition of the Simpsons TV dataset and support for checkpoints. Check out my [colab notebook](https://colab.research.google.com/drive/1ToFheh_WPc9v_nspega_MqX5t130MYWB) to experience it or just do all the other great stuff with nanoGPT that is listed below.
