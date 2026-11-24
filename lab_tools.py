@@ -58,10 +58,13 @@ def iteration_of(path):
     return load(path)[1]
 
 
-def compare_checkpoints(folder, prompt, n_chars=1000, temperature=0.8, top_k=None, seed=1337, show=True):
-    """STEP 1 - the same prompt (and the same random seed) through every checkpoint."""
+def compare_checkpoints(folder, prompt, n_chars=1000, temperature=0.8, top_k=None, seed=1337, show=True, which=(1, 5, 10)):
+    """STEP 1 - the same prompt (and the same random seed) through several checkpoints.
+    which = checkpoint numbers to use (1, 5, 10 = after 1,000 / 5,000 / 10,000 iterations); which=None uses all of them."""
     out = {}
     for p in checkpoints(folder):
+        if which is not None and int(os.path.basename(p)[5:-3]) not in which:
+            continue
         name = os.path.basename(p)[:-3]
         text = generate(p, prompt, n_chars, temperature, top_k, seed)
         out[name] = {'iteration': iteration_of(p), 'text': text, 'temperature': temperature}
